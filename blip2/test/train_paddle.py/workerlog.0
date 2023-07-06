@@ -1,0 +1,16 @@
+  File "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/projects/blip2/eval/pretrain_stage2.yaml", line 15
+    model:
+          ^
+SyntaxError: invalid syntax
+  File "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/projects/blip2/eval/pretrain_stage2.yaml", line 15
+    model:
+          ^
+SyntaxError: invalid syntax
+  File "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/projects/blip2/train/pretrain_stage2.yaml", line 6
+    model:
+          ^
+SyntaxError: invalid syntax
+  File "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/projects/blip2/train/pretrain_stage2.yaml", line 6
+    model:
+          ^
+SyntaxError: invalid syntax

@@ -1,0 +1,15 @@
+omegaconf
+iopath
+opencv-python
+pycocoevalcap
+pycocotools
+pyarrow==8.0.0
+contexttimer
+decord
+einops>=0.4.1
+fairscale==0.4.4
+ftfy
+ipython
+pandas
+scikit-image
+tqdm
