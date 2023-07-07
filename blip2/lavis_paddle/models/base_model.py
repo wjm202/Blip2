@@ -96,6 +96,7 @@ class BaseModel(nn.Layer):
             if pretrain2_path:
                 state_dict = paddle.load(pretrain2_path)['model']
                 # self.Qformer.set_state_dict(state_dict)
+                state_dict["opt_model.lm_head.decoder_weight"]=state_dict["opt_model.lm_head.decoder_weight"].astype("float32")
                 self.set_state_dict(state_dict)
                 logging.info("load checkpoint from %s" % pretrain2_path)
                 print('load\n\n\n\n\n\n\n')

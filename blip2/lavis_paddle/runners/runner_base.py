@@ -332,7 +332,7 @@ class RunnerBase:
         if not self.evaluate_only and self.resume_ckpt_path is not None:
             self._load_checkpoint(self.resume_ckpt_path)
             
-        if self.config.run_cfg.amp:
+        if self.config.run_cfg.get("pretrained2", None) and self.config.run_cfg.amp:
             if not self.evaluate_only:
                 decorated=paddle.amp.decorate(models=[self.model._layers.visual_encoder,self.model._layers.opt_model], optimizers=self.optimizer,level='O2')
                 if self.optimizer is None:

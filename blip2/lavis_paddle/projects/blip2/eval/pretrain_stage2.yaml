@@ -22,8 +22,8 @@ model:
   pretrained:  "/paddle/workspace/checkpoints/blip2_pretrained.pdparams"
   # pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2_caption_opt2.7b.pdparams"
   # pretrained2: "lavis_paddle/output/BLIP2/Pretrain_stage2_paddle/20230619094/checkpoint_9.pdparams"
-  # pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/output/BLIP2/Pretrain_stage2_paddle/20230628070/checkpoint_9.pdparams"
-  pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/最终结果/20230629063/checkpoint_best.pdparams"
+  pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/output/BLIP2/Pretrain_stage2_paddle/20230706131/checkpoint_9.pdparams"
+  # pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/最终结果/20230629063/checkpoint_best.pdparams"
 
 datasets:
   coco_caption: # name of the dataset builder

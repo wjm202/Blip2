@@ -287,7 +287,7 @@ class BaseTask:
         final_result_file = os.path.join(result_dir, "%s.json" % filename)
         # if is_dist_avail_and_initialized():
         #     dist.barrier()
-        # paddle.distributed.barrier()
+        paddle.distributed.barrier()
         # if is_main_process():
         # logging.warning("rank %d starts merging results." % get_rank())
         if rank_id_curr_node==0:
