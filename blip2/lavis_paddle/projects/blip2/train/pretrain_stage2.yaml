@@ -43,8 +43,8 @@ datasets:
 
 run:
   task: image_text_pretrain
-  # optimizer
-  lr_sched: "linear_warmup_cosine_lr"
+  # optimizer useless
+  lr_sched: "linear_warmup_cosine_lr_paddle"
   init_lr: 1e-4
   min_lr: 1e-5
   warmup_lr: 1e-6
@@ -52,12 +52,12 @@ run:
   weight_decay: 0.05
   max_epoch: 10
   batch_size_train: 64
-  batch_size_eval: 64
+  batch_size_eval: 1
   num_workers: 4
   warmup_steps: 2000
 
   seed: 42
-  output_dir: "output/BLIP2/Pretrain_stage2"
+  output_dir: "output/BLIP2/Pretrain_stage2_paddle"
 
   amp: True
   resume_ckpt_path: null
