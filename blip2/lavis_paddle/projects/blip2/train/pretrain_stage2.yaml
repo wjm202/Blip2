@@ -24,24 +24,40 @@ datasets:
     # build_info:
     #     images:
     #         storage: '/export/share/datasets/vision/coco/images/'          
+  # vg_caption: # name of the dataset builder
+  #   vis_processor:
+  #       train:
+  #         name: "blip_image_train"
+  #         image_size: 224
+  #   text_processor:
+  #       train:
+  #         name: "blip_caption"
+  # sbu_caption: # name of the dataset builder
+  #   vis_processor:
+  #       train:
+  #         name: "blip_image_train"
+  #         image_size: 224
+  #   text_processor:
+  #       train:
+  #         name: "blip_caption"    
 
 run:
   task: image_text_pretrain
-  # optimizer useless
-  lr_sched: "linear_warmup_cosine_lr_paddle"
+  # optimizer
+  lr_sched: "linear_warmup_cosine_lr"
   init_lr: 1e-4
   min_lr: 1e-5
   warmup_lr: 1e-6
 
   weight_decay: 0.05
   max_epoch: 10
-  batch_size_train: 128
-  batch_size_eval: 32
+  batch_size_train: 64
+  batch_size_eval: 64
   num_workers: 4
   warmup_steps: 2000
 
   seed: 42
-  output_dir: "output/BLIP2/Pretrain_stage2_paddle"
+  output_dir: "output/BLIP2/Pretrain_stage2"
 
   amp: True
   resume_ckpt_path: null
