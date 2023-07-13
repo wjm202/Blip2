@@ -22,7 +22,7 @@ import paddle
 import paddle.nn as nn
 import sys
 from paddle.nn.initializer import TruncatedNormal, Constant, Normal
-
+from paddle import _legacy_C_ops
 
 trunc_normal_ = TruncatedNormal(std=.02)
 normal_ = Normal
@@ -77,8 +77,15 @@ class Mlp(nn.Layer):
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
+        if isinstance(act_layer, nn.GELU)
+            x = _legacy_C_ops.fused_gemm_epilogue(
+            x, self.fc1.weight, self.fc1.bias, 'trans_x', False, 'trans_y', False, 'activation', 'gelu')
+        elif isinstance(act_layer, nn.ReLU)
+            x = _legacy_C_ops.fused_gemm_epilogue(
+            x, self.fc1.weight, self.fc1.bias, 'trans_x', False, 'trans_y', False, 'activation', 'relu')
+        else
+            x = self.fc1(x)
+            x = self.act(x)
         x = self.fc2(x)
         x = self.drop(x)
         return x
