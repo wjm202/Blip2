@@ -49,7 +49,7 @@ class TransformerDecoder(Layer):
         super(TransformerDecoder, self).__init__()
 
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_out = nn.Linear(config.hidden_size, config.word_embed_proj_dim, bias_attr=False)
+            self.project_out = paddle.incubate.nn.FusedLinear(config.hidden_size, config.word_embed_proj_dim, bias_attr=False)
         else:
             self.project_out = None
 
@@ -189,7 +189,7 @@ class OPTEmbeddings(Layer):
         )
 
         if config.word_embed_proj_dim != config.hidden_size:
-            self.project_in = nn.Linear(config.word_embed_proj_dim, config.hidden_size, bias_attr=False)
+            self.project_in = paddle.incubate.nn.FusedLinear(config.word_embed_proj_dim, config.hidden_size, bias_attr=False)
         else:
             self.project_in = None
 
@@ -257,7 +257,7 @@ class OPTPretrainedModel(PretrainedModel):
 
     def init_weights(self, layer):
         """Initialization hook"""
-        if isinstance(layer, (nn.Linear, nn.Embedding)):
+        if isinstance(layer, (paddle.incubate.nn.FusedLinear, nn.Linear, nn.Embedding)):
             # In the dygraph mode, use the `set_value` to reset the parameter directly,
             # and reset the `state_dict` to update parameter in static mode.
             if isinstance(layer.weight, paddle.Tensor):

@@ -63,11 +63,11 @@ class Blip2Qformer(Blip2Base):
             if '_query' in name:
                 key_orig = name.replace('_query', '')
                 param.copy_(state_dict[key_orig], False) ### problem
-        self.vision_proj = paddle.nn.Linear(in_features=self.Qformer.config
+        self.vision_proj = paddle.incubate.nn.FusedLinear(in_features=self.Qformer.config
             .hidden_size, out_features=embed_dim)
-        self.text_proj = paddle.nn.Linear(in_features=self.Qformer.config.
+        self.text_proj = paddle.incubate.nn.FusedLinear(in_features=self.Qformer.config.
             hidden_size, out_features=embed_dim)
-        self.itm_head = paddle.nn.Linear(in_features=self.Qformer.config.
+        self.itm_head = paddle.incubate.nn.FusedLinear(in_features=self.Qformer.config.
             hidden_size, out_features=2)
         self.temp = self.create_parameter(
             shape=(1, ), default_initializer=paddle.nn.initializer.Constant(value=0.07))
