@@ -263,7 +263,7 @@ class MultiHeadAttention(nn.Layer):
             # incremental_state with initial value, mainly for usage like UniLM
             return self.Cache(key, value)
 
-    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None, use_flash_attn=False, is_causal=True):
+    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None, use_flash_attn=True, is_causal=True):
         r"""
         Applies multi-head attention to map queries and a set of key-value pairs
         to outputs.

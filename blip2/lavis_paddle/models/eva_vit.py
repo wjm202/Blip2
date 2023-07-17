@@ -22,6 +22,9 @@ import paddle
 import paddle.nn as nn
 import sys
 from paddle.nn.initializer import TruncatedNormal, Constant, Normal
+from paddle.nn.functional.flash_attention import (
+    flash_attention,
+)
 
 
 trunc_normal_ = TruncatedNormal(std=.02)
@@ -143,29 +146,39 @@ class Attention(nn.Layer):
         self.register_buffer("relative_position_index",
                              relative_position_index)
 
-    def forward(self, x, rel_pos_bias=None):
+    def forward(self, x, rel_pos_bias=None, use_flash_attn=True):
         # B= paddle.shape(x)[0]
         N, C = x.shape[1:]
         # if self.q_bias is not None:
         #     qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
-        qkv = self.qkv(x).reshape((-1, N, 3, self.num_heads, C //self.num_heads)).transpose((2, 0, 3, 1, 4))
+        if use_flash_attn:
+            qkv = self.qkv(x).reshape((-1, N, 3, self.num_heads, C //self.num_heads)).transpose((2, 0, 1, 3, 4))
+        else:
+            qkv = self.qkv(x).reshape((-1, N, 3, self.num_heads, C //self.num_heads)).transpose((2, 0, 3, 1, 4))
         # print(self.qkv.bias[2100])
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        attn = (q.matmul(k.transpose((0, 1, 3, 2)))) * self.scale
-        if hasattr(self, 'relative_position_bias_table'):
-            relative_position_bias = \
-                self.relative_position_bias_table[self.relative_position_index.reshape([-1])].reshape([
-                    self.window_size[0] * self.window_size[1] + 1,
-                    self.window_size[0] * self.window_size[1] + 1, -1])  # Wh*Ww,Wh*Ww,nH
-            relative_position_bias = relative_position_bias.transpose(
-                [2, 0, 1])  # nH, Wh*Ww, Wh*Ww
-            attn = attn + relative_position_bias.unsqueeze(0)
+        if use_flash_attn:
+            x,_ = flash_attention(q, k, v,
+                                dropout=self.proj_drop.p,
+                                causal=False,
+                               return_softmax=False)
+            x = paddle.reshape(x, [0, 0, -1])
+        else:
+            attn = (q.matmul(k.transpose((0, 1, 3, 2)))) * self.scale
+            if hasattr(self, 'relative_position_bias_table'):
+                relative_position_bias = \
+                    self.relative_position_bias_table[self.relative_position_index.reshape([-1])].reshape([
+                        self.window_size[0] * self.window_size[1] + 1,
+                        self.window_size[0] * self.window_size[1] + 1, -1])  # Wh*Ww,Wh*Ww,nH
+                relative_position_bias = relative_position_bias.transpose(
+                    [2, 0, 1])  # nH, Wh*Ww, Wh*Ww
+                attn = attn + relative_position_bias.unsqueeze(0)
 
-        attn = nn.functional.softmax(attn, axis=-1)
-        attn = self.attn_drop(attn)
+            attn = nn.functional.softmax(attn, axis=-1)
+            attn = self.attn_drop(attn)
 
-        x = (attn.matmul(v)).transpose((0, 2, 1, 3)).reshape((-1, N, C))
+            x = (attn.matmul(v)).transpose((0, 2, 1, 3)).reshape((-1, N, C))
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
