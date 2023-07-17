@@ -84,7 +84,7 @@ class BaseModel(nn.Layer):
         When loading the pretrained model, each task-specific architecture may define their
         own load_from_pretrained() method.
         """
-        load_pretrained =cfg.get("pretrained", True)
+        load_pretrained =cfg.get("load_pretrained", True)
         if load_pretrained:
             pretrain_path = cfg.get("pretrained", None)
             assert "Found load_finetuned is False, but pretrain_path is None."

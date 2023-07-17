@@ -7,7 +7,7 @@ model:
   arch: blip2
   model_type: pretrain
   # TODO: support stage 1 pretraining from scratch (load_pretrained=False does not have effect as of now)
-  load_pretrained: True
+  load_pretrained: False
   pretrained: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2_stage1_pretrain.pdparams"
   freeze_vit: True
 
