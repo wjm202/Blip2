@@ -27,6 +27,9 @@ import paddle.tensor as tensor
 from paddle.distributed import fleet
 from paddle.fluid import layers
 from paddle.nn import Layer
+from paddle.nn.functional.flash_attention import (
+    flash_attention,
+)
 from paddle.nn.layer.transformer import _convert_param_attr_to_list
 
 from paddlenlp.transformers.conversion_utils import StateDictNameMapping
@@ -163,24 +166,29 @@ class MultiHeadAttention(nn.Layer):
 
             self.out_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
-    def _fuse_prepare_qkv(self, query, use_cache=False, cache=None):
+    def _fuse_prepare_qkv(self, query, use_cache=False, cache=None, use_flash_attn=False):
         mix_layer = self.qkv_proj(query)
         mix_layer = paddle.reshape_(mix_layer, [0, 0, self.num_heads, 3 * self.head_dim])
-        mix_layer = paddle.transpose(mix_layer, [0, 2, 1, 3])
+        if not use_flash_attn:
+            mix_layer = paddle.transpose(mix_layer, [0, 2, 1, 3])
         q, k, v = paddle.split(mix_layer, num_or_sections=3, axis=-1)
 
         assert not isinstance(cache, self.StaticCache), "cache currently does not support the StaticCache type"
 
         if isinstance(cache, self.Cache):
             # for decoder self-attention in inference
-            k = paddle.concat([cache.k, k], axis=2)
-            v = paddle.concat([cache.v, v], axis=2)
+            if not use_flash_attn:
+                k = paddle.concat([cache.k, k], axis=2)
+                v = paddle.concat([cache.v, v], axis=2)
+            else:
+                k = paddle.concat([cache.k, k], axis=1)
+                v = paddle.concat([cache.v, v], axis=1)
         if use_cache is True:
             cache = self.Cache(k, v)
 
         return (q, k, v, cache) if use_cache else (q, k, v, None)
 
-    def _prepare_qkv(self, query, key, value, use_cache=False, cache=None):
+    def _prepare_qkv(self, query, key, value, use_cache=False, cache=None, use_flash_attn=False):
         r"""
         Prapares linear projected queries, keys and values for usage of subsequnt
         multiple parallel attention. If `cache` is not None, using cached results
@@ -189,24 +197,30 @@ class MultiHeadAttention(nn.Layer):
         """
         q = self.q_proj(query)
         q = paddle.reshape(x=q, shape=[0, 0, self.num_heads, self.head_dim])
-        q = paddle.transpose(x=q, perm=[0, 2, 1, 3])
+        if not use_flash_attn:
+            q = paddle.transpose(x=q, perm=[0, 2, 1, 3])
 
         if isinstance(cache, self.StaticCache):
             # for encoder-decoder attention in inference and has cached
             k, v = cache.k, cache.v
         else:
-            k, v = self.compute_kv(key, value)
+            k, v = self.compute_kv(key, value, use_flash_attn)
 
         if isinstance(cache, self.Cache):
             # for decoder self-attention in inference
-            k = paddle.concat([cache.k, k], axis=2)
-            v = paddle.concat([cache.v, v], axis=2)
+            if not use_flash_attn:
+                k = paddle.concat([cache.k, k], axis=2)
+                v = paddle.concat([cache.v, v], axis=2)
+            else:
+                k = paddle.concat([cache.k, k], axis=1)
+                v = paddle.concat([cache.v, v], axis=1)
+
         if use_cache is True:
             cache = self.Cache(k, v)
 
         return (q, k, v, None) if use_cache is False else (q, k, v, cache)
 
-    def compute_kv(self, key, value):
+    def compute_kv(self, key, value, use_flash_attn=False):
         r"""
         Applies linear projection on input keys and values, then splits heads
         (reshape and transpose) to get keys and values from different representation
@@ -221,9 +235,11 @@ class MultiHeadAttention(nn.Layer):
         k = self.k_proj(key)
         v = self.v_proj(value)
         k = tensor.reshape(x=k, shape=[0, 0, self.num_heads, self.head_dim])
-        k = tensor.transpose(x=k, perm=[0, 2, 1, 3])
+        if not use_flash_attn:
+            k = tensor.transpose(x=k, perm=[0, 2, 1, 3])
         v = tensor.reshape(x=v, shape=[0, 0, self.num_heads, self.head_dim])
-        v = tensor.transpose(x=v, perm=[0, 2, 1, 3])
+        if not use_flash_attn:
+            v = tensor.transpose(x=v, perm=[0, 2, 1, 3])
         return k, v
 
     def gen_cache(self, key, value=None, type=Cache):
@@ -247,7 +263,7 @@ class MultiHeadAttention(nn.Layer):
             # incremental_state with initial value, mainly for usage like UniLM
             return self.Cache(key, value)
 
-    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None):
+    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None, use_flash_attn=False, is_causal=True):
         r"""
         Applies multi-head attention to map queries and a set of key-value pairs
         to outputs.
@@ -256,25 +272,33 @@ class MultiHeadAttention(nn.Layer):
         value = query if value is None else value
 
         if self.fuse_attention_qkv:
-            q, k, v, cache = self._fuse_prepare_qkv(query, use_cache, cache)
+            q, k, v, cache = self._fuse_prepare_qkv(query, use_cache, cache, use_flash_attn)
         else:
-            q, k, v, cache = self._prepare_qkv(query, key, value, use_cache, cache)
+            q, k, v, cache = self._prepare_qkv(query, key, value, use_cache, cache, use_flash_attn)
 
-        # scale dot product attention
-        product = paddle.matmul(x=q * (self.head_dim**-0.5), y=k, transpose_y=True)
+        if use_flash_attn:
+            bsz, q_len, num_heads, head_dim = q.shape
+            out, weights = flash_attention(q, k, v,
+                                           causal=is_causal and q.shape[1] != 1,
+                                           return_softmax=self.need_weights,
+                                           dropout=self.dropout)
+            out = out.reshape([bsz, q_len, head_dim * num_heads])
+        else:
+            # scale dot product attention
+            product = paddle.matmul(x=q * (self.head_dim**-0.5), y=k, transpose_y=True)
 
-        if attn_mask is not None:
-            product = product + attn_mask
+            if attn_mask is not None:
+                product = product + attn_mask
 
-        weights = F.softmax(product)
-        if self.dropout:
-            weights = F.dropout(weights, self.dropout, training=self.training, mode="upscale_in_train")
+            weights = F.softmax(product)
+            if self.dropout:
+                weights = F.dropout(weights, self.dropout, training=self.training, mode="upscale_in_train")
 
-        out = tensor.matmul(weights, v)
+            out = tensor.matmul(weights, v)
 
-        # combine heads
-        out = tensor.transpose(out, perm=[0, 2, 1, 3])
-        out = tensor.reshape(x=out, shape=[0, 0, out.shape[2] * out.shape[3]])
+            # combine heads
+            out = tensor.transpose(out, perm=[0, 2, 1, 3])
+            out = tensor.reshape(x=out, shape=[0, 0, out.shape[2] * out.shape[3]])
 
         # project to output
         out = self.out_proj(out)
