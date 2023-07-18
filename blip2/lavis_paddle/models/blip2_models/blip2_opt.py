@@ -81,7 +81,7 @@ class Blip2OPTPaddle(Blip2Base):
         self.eos_token_id = self.opt_tokenizer(
             "\n", add_special_tokens=False
         ).input_ids[0]
-        self.opt_proj = nn.Linear(
+        self.opt_proj = paddle.incubate.nn.FusedLinear(
             self.Qformer.config.hidden_size, self.opt_model.config.hidden_size
         )
 

@@ -31,7 +31,7 @@ class Blip2Base(BaseModel):
         return tokenizer
 
     def maybe_autocast(self):
-        return paddle.amp.auto_cast(dtype='float16')
+        return paddle.amp.auto_cast(custom_white_list=['fused_gemm_epilogue'],dtype='float16')
 
     @classmethod
     def init_Qformer(cls, num_query_token, vision_width, cross_attention_freq=2):
