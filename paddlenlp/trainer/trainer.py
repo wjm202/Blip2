@@ -94,7 +94,6 @@ from .utils.helper import (  # nested_truncate,
     nested_numpify,
     nested_truncate,
 )
-import json
 
 DEFAULT_CALLBACKS = [DefaultFlowCallback]
 DEFAULT_PROGRESS_CALLBACK = ProgressCallback
@@ -205,9 +204,8 @@ class Trainer:
         callbacks: Optional[List[TrainerCallback]] = None,
         optimizers: Tuple[paddle.optimizer.Optimizer, paddle.optimizer.lr.LRScheduler] = (None, None),
         preprocess_logits_for_metrics: Callable[[paddle.Tensor, paddle.Tensor], paddle.Tensor] = None,
-        processor=None,
-    ):  
-        self.processor=processor
+    ):
+
         if args is None:
             output_dir = "tmp_trainer"
             logger.info(f"No `TrainingArguments` passed, using `output_dir={output_dir}`.")
@@ -301,17 +299,17 @@ class Trainer:
             self.do_grad_scaling = True if args.fp16 else False
             self.amp_dtype = "float16" if args.fp16 else "bfloat16"
             # fix for load saved fp16 or bf16 ckpt, decorate model first.
-            if self.args.fp16_opt_level == "O2":#wjm del
+            if self.args.fp16_opt_level == "O2":
                 if self.amp_dtype == "bfloat16":
                     # fix for paddlepaddle < 2.4.1, not support for bf16
-                    paddle.amp.decorate(models=[model.visual_encoder,model.language_model], level=self.args.fp16_opt_level, dtype=self.amp_dtype)
+                    paddle.amp.decorate(models=model, level=self.args.fp16_opt_level, dtype=self.amp_dtype)
                 else:
-                    paddle.amp.decorate(models=[model.visual_encoder,model.language_model], level=self.args.fp16_opt_level)
+                    paddle.amp.decorate(models=model, level=self.args.fp16_opt_level)
             # for pipeline mode and pure tensor parallel
             if self.args.pipeline_parallel_degree > 1 or (
                 self.args.tensor_parallel_degree > 1 and self.sharding is None
             ):
-                self.scaler = paddle.amp.GradScaler(init_loss_scaling=1.0)
+                self.scaler = paddle.amp.GradScaler(init_loss_scaling=self.args.scale_loss)
                 if self.args.amp_master_grad:
                     mix_precision_utils.MixPrecisionScaler(self.scaler)  # retun value has no use
                 self.scaler = fleet.distributed_scaler(self.scaler)
@@ -761,6 +759,10 @@ class Trainer:
 
                     # Optimizer step
                     optimizer_was_run = True
+
+                    if optimizer_was_run:
+                        self.lr_scheduler.step()
+
                     if self.do_grad_scaling:
                         scale_before = self.scaler._scale.numpy()
                         self.scaler.step(self.optimizer)
@@ -768,15 +770,15 @@ class Trainer:
                         scale_after = self.scaler._scale.numpy()
                         optimizer_was_run = not self.scaler._cache_founf_inf
                         if not optimizer_was_run:
-                            logger.warning(
+                            logger.warning( 
                                 f"optimizer not run, scale_before: {scale_before[0]}, scale_after: {scale_after[0]}"
                             )
                     else:
                         self.optimizer.step()
 
-                    if optimizer_was_run:
-                        self.lr_scheduler.step()
-
+                    # import pdb; pdb.set_trace()
+                    # if optimizer_was_run:
+                    #     self.lr_scheduler.step()
                     self.optimizer.clear_grad()
 
                     self.state.global_step += 1
@@ -789,8 +791,6 @@ class Trainer:
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     break
-            # if self.eval:#wjm
-                
 
             if step < 0:
                 logger.warning(
@@ -862,7 +862,7 @@ class Trainer:
         if self.args.world_size <= 1:
             return paddle.io.BatchSampler(
                 dataset=self.train_dataset,
-                shuffle=True,
+                shuffle=False, #True,
                 batch_size=self.args.per_device_train_batch_size,
                 drop_last=self.args.dataloader_drop_last,
             )
@@ -870,7 +870,7 @@ class Trainer:
         return DistributedBatchSampler(
             self.train_dataset,
             batch_size=self.args.per_device_train_batch_size,
-            shuffle=True,
+            shuffle=False, #True,
             num_replicas=self.args.dataset_world_size,
             rank=self.args.dataset_rank,
             drop_last=self.args.dataloader_drop_last,
@@ -922,12 +922,6 @@ class Trainer:
                         eval_dataset=eval_dataset,
                         ignore_keys=ignore_keys_for_eval,
                         metric_key_prefix=f"eval_{eval_dataset_name}",
-                    )
-            elif isinstance(self.eval_dataset, Dataset):
-                    metrics = self.evaluate(
-                        eval_dataset=self.eval_dataset,
-                        ignore_keys=ignore_keys_for_eval,
-                        metric_key_prefix=f"eval_{'eval'}",
                     )
             else:
                 metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
@@ -1283,14 +1277,13 @@ class Trainer:
                 )
             else:
                 decorated = paddle.amp.decorate(
-                    models=[model.visual_encoder,model.language_model], optimizers=self.optimizer, level=self.args.fp16_opt_level
+                    models=model, optimizers=self.optimizer, level=self.args.fp16_opt_level
                 )
 
             if self.optimizer is None:
                 model = decorated
             else:
-                model.visual_encoder,model.language_model= decorated[0]
-                self.optimizer = decorated[1]
+                model, self.optimizer = decorated
 
         # Multi-gpu training
         if self.args.world_size > 1 and not self.args.use_hybrid_parallel:
@@ -1518,7 +1511,7 @@ class Trainer:
         model.train()
         inputs = self._prepare_inputs(inputs)
 
-        with paddle.amp.auto_cast():
+        with self.autocast_smart_context_manager():
             loss = self.compute_loss(model, inputs)
 
         if self.args.gradient_accumulation_steps > 1:
@@ -1876,6 +1869,9 @@ class Trainer:
         output = self.evaluation_loop(
             eval_dataloader,
             description="Evaluation",
+            # No point gathering the predictions if there are no metrics, otherwise we defer to
+            # self.args.prediction_loss_only
+            prediction_loss_only=True if self.compute_metrics is None else None,
             ignore_keys=ignore_keys,
             metric_key_prefix=metric_key_prefix,
         )
@@ -1984,7 +1980,7 @@ class Trainer:
 
         observed_num_examples = 0
         # Main evaluation loop
-        results = []
+        losses = []
         for step, inputs in enumerate(dataloader):
             # Update the observed num examples
             observed_batch_size = find_batch_size(inputs)
@@ -1995,17 +1991,83 @@ class Trainer:
                     batch_size = observed_batch_size
 
             # Prediction step
-            eval_output = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
-            results.extend(eval_output)
-            if step==5:
-                break
+            loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+
+            # Update containers on host
+            if loss is not None:
+                # losses = self._nested_gather(loss.repeat(batch_size))
+                losses = self._nested_gather(paddle.tile(loss, repeat_times=[batch_size, 1]))
+                losses_host = losses if losses_host is None else paddle.concat((losses_host, losses), axis=0)
+            if labels is not None:
+                labels = self._pad_across_processes(labels)
+                labels = self._nested_gather(labels)
+                labels_host = labels if labels_host is None else nested_concat(labels_host, labels, padding_index=-100)
+            if logits is not None:
+                logits = self._pad_across_processes(logits)
+                logits = self._nested_gather(logits)
+                if self.preprocess_logits_for_metrics is not None:
+                    logits = self.preprocess_logits_for_metrics(logits, labels)
+                preds_host = logits if preds_host is None else nested_concat(preds_host, logits, padding_index=-100)
             self.control = self.callback_handler.on_prediction_step(args, self.state, self.control)
+
+            # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
+            if args.eval_accumulation_steps is not None and (step + 1) % args.eval_accumulation_steps == 0:
+                if losses_host is not None:
+                    losses = nested_numpify(losses_host)
+                    all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
+                if preds_host is not None:
+                    logits = nested_numpify(preds_host)
+                    all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+
+                if labels_host is not None:
+                    labels = nested_numpify(labels_host)
+                    all_labels = (
+                        labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
+                    )
+
+                # Set back to None to begin a new accumulation
+                losses_host, preds_host, labels_host = None, None, None
+
             if max_eval_iters > 0 and step >= max_eval_iters - 1:
-                 break
-        if results is not None:
-                self.after_evaluation(val_result=results)
+                break
+
+        # Gather all remaining tensors and put them back on the CPU
+        if losses_host is not None:
+            losses = nested_numpify(losses_host)
+            all_losses = losses if all_losses is None else np.concatenate((all_losses, losses), axis=0)
+        if preds_host is not None:
+            logits = nested_numpify(preds_host)
+            all_preds = logits if all_preds is None else nested_concat(all_preds, logits, padding_index=-100)
+        if labels_host is not None:
+            labels = nested_numpify(labels_host)
+            all_labels = labels if all_labels is None else nested_concat(all_labels, labels, padding_index=-100)
+
+        # Number of samples
+        if num_samples is not None:
+            pass
+        elif has_length(eval_dataset):
+            num_samples = len(eval_dataset)
+        # The instance check is weird and does not actually check for the type, but whether the dataset has the right
+        # methods. Therefore we need to make sure it also has the attribute.
+        elif isinstance(eval_dataset, IterableDatasetShard) and hasattr(eval_dataset, "num_examples"):
+            num_samples = eval_dataset.num_examples
+        else:
+            if has_length(dataloader):
+                num_samples = self.num_examples(dataloader)
+            else:  # both len(dataloader.dataset) and len(dataloader) fail
+                num_samples = observed_num_examples
+
+        # Number of losses has been rounded to a multiple of batch_size and in a distributed training, the number of
+        # samplers has been rounded to a multiple of batch_size, so we truncate.
+        if all_losses is not None:
+            all_losses = all_losses[:num_samples]
+        if all_preds is not None:
+            all_preds = nested_truncate(all_preds, num_samples)
+        if all_labels is not None:
+            all_labels = nested_truncate(all_labels, num_samples)
 
         model.train()
+
         # Metrics!
         if self.compute_metrics is not None and all_preds is not None and all_labels is not None:
             metrics = self.compute_metrics(EvalPrediction(predictions=all_preds, label_ids=all_labels))
@@ -2140,24 +2202,57 @@ class Trainer:
             Tuple[Optional[paddle.Tensor], Optional[paddle.Tensor], Optional[paddle.Tensor]]: A tuple with the loss,
             logits and labels (each being optional).
         """
+        if self.args.pipeline_parallel_degree > 1:
+            # hack for pipeline mode
+            inputs = self._prepare_inputs(inputs)
+            return self.prediction_pipeline_step(model, inputs, prediction_loss_only, ignore_keys)
+
+        has_labels = all(inputs.get(k) is not None for k in self.label_names)
         inputs = self._prepare_inputs(inputs)
-        results = []
+        if ignore_keys is None:
+            if hasattr(self.model, "config"):
+                ignore_keys = getattr(self.model.config, "keys_to_ignore_at_inference", [])
+            else:
+                ignore_keys = []
+
+        # labels may be popped when computing the loss (label smoothing for instance) so we grab them first.
+        if has_labels:
+            labels = nested_detach(tuple(inputs.get(name) for name in self.label_names))
+            if len(labels) == 1:
+                labels = labels[0]
+        else:
+            labels = None
+
         with paddle.no_grad():
-            with self.autocast_smart_context_manager():
-                prompt = self.args.prompt
-                model_inputs = self.processor(
-                    images=[inputs['pixel_values'][i] for i in  range(inputs['pixel_values'].shape[0])],
-                    text=[prompt]*inputs['pixel_values'].shape[0],
-                    return_tensors="pd",
-                    return_attention_mask=True,
-                    mode="test",
-                )
-                generated_ids, scores = model.generate(**model_inputs)
-                generated_text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)
-                for caption, img_id in zip(generated_text, inputs['image_id']):
-                    results.append({"caption": caption, "image_id": int(img_id)})
-        return results
-    
+            if has_labels:
+                with self.autocast_smart_context_manager():
+                    loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                loss = loss.mean().detach()
+
+                if isinstance(outputs, dict):
+                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                else:
+                    logits = outputs[1:]
+            else:
+                loss = None
+                with self.autocast_smart_context_manager():
+                    outputs = model(**inputs)
+                if isinstance(outputs, dict):
+                    logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                else:
+                    logits = outputs
+                # TODO: this needs to be fixed and made cleaner later.
+                if self.args.past_index >= 0:
+                    self._past = outputs[self.args.past_index - 1]
+
+        if prediction_loss_only:
+            return (loss, None, None)
+
+        logits = nested_detach(logits)
+        if isinstance(logits, (list, tuple)) and len(logits) == 1:
+            logits = logits[0]
+
+        return (loss, logits, labels)
 
     def is_local_process_zero(self) -> bool:
         """
@@ -2297,114 +2392,3 @@ class Trainer:
                     logger.info("{:30}: {}".format(a, v))
 
         logger.info("")
-        
-        
-        
-    def after_evaluation(self, val_result):
-        eval_result_file = self.save_result(
-            result=val_result,
-            result_dir=self.args.output_dir+"/resulut",
-            filename="{}_epoch{}".format('eval', 'eval'),
-            remove_duplicate="image_id",
-        )
-
-        metrics = self._report_metrics(
-            eval_result_file=eval_result_file
-        )
-
-        return metrics
-    
-    @staticmethod
-    def save_result(result, result_dir, filename, remove_duplicate=""):
-        import logging
-        rank_id_curr_node = int(os.environ.get("PADDLE_RANK_IN_NODE", 0))
-        result_file = os.path.join(
-            result_dir, "%s_rank%d.json" % (filename, rank_id_curr_node)
-            #result_dir, "%s_rank%d.json" % (filename, 0)
-        )
-        if not os.path.exists(result_dir): os.mkdir(result_dir)
-        json.dump(result, open(result_file, "w"))
-
-        final_result_file = os.path.join(result_dir, "%s.json" % filename)
-        # if is_dist_avail_and_initialized():
-        #     dist.barrier()
-        # paddle.distributed.barrier()
-        # if is_main_process():
-        # logging.warning("rank %d starts merging results." % get_rank())
-        if rank_id_curr_node==0:
-            logging.warning("rank %d starts merging results." % rank_id_curr_node)
-            result = []
-            # for rank in range(get_world_size()):
-            for rank in range(int(os.environ.get("PADDLE_TRAINERS_NUM", 1))):
-                result_file = os.path.join(
-                    result_dir, "%s_rank%d.json" % (filename, rank)
-                )
-                res = json.load(open(result_file, "r"))
-                result += res
-
-            if remove_duplicate:
-                result_new = []
-                id_list = []
-                for res in result:
-                    if res[remove_duplicate] not in id_list:
-                        id_list.append(res[remove_duplicate])
-                        result_new.append(res)
-                result = result_new
-
-            json.dump(result, open(final_result_file, "w"))
-            print("result file saved to %s" % final_result_file)
-        else:
-            while not os.path.exists(final_result_file):
-                time.sleep(0.5)
-                logging.warning("rank %d waits rank0 to merge results." % rank_id_curr_node)
-            
-        # combine results from all processes
-        return final_result_file
- 
-    def _report_metrics(self, eval_result_file, split_name="test"):
-
-        # TODO better way to define this
-        coco_gt_root = os.path.join('/export/home/.cache/lavis', "coco_gt")
-        coco_val = coco_caption_eval(coco_gt_root, eval_result_file, split_name)
-
-        agg_metrics = coco_val.eval["CIDEr"] + coco_val.eval["Bleu_4"]
-        log_stats = {split_name: {k: v for k, v in coco_val.eval.items()}}
-
-        with open(os.path.join(self.args.output_dir, "evaluate.txt"), "a") as f:
-            f.write(json.dumps(log_stats) + "\n")
-
-        coco_res = {k: v for k, v in coco_val.eval.items()}
-        coco_res["agg_metrics"] = agg_metrics
-
-        return coco_res
-    
-    
-    
-    
-from pycocoevalcap.eval import COCOEvalCap
-from pycocotools.coco import COCO   
-def coco_caption_eval(coco_gt_root, results_file, split):
-    urls = {
-        "val": "https://storage.googleapis.com/sfr-vision-language-research/datasets/coco_karpathy_val_gt.json",
-        "test": "https://storage.googleapis.com/sfr-vision-language-research/datasets/coco_karpathy_test_gt.json",
-    }
-    filenames = {
-        "val": "coco_karpathy_val_gt.json",
-        "test": "coco_karpathy_test_gt.json",
-    }
-
-    #download_url(urls[split], coco_gt_root)
-    annotation_file = os.path.join(coco_gt_root, filenames['val'])
-
-    # create coco object and coco_result object
-    coco = COCO(annotation_file)
-    coco_result = coco.loadRes(results_file)
-
-    coco_eval = COCOEvalCap(coco, coco_result)
-    coco_eval.evaluate()
-
-    # print output evaluation scores
-    for metric, score in coco_eval.eval.items():
-        print(f"{metric}: {score:.3f}")
-
-    return coco_eval

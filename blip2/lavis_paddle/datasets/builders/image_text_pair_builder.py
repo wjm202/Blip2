@@ -1,3 +1,4 @@
+
 """
  Copyright (c) 2022, salesforce.com, inc.
  All rights reserved.
@@ -16,3 +17,8 @@ class VGCaptionBuilder(BaseDatasetBuilder):
     train_dataset_cls = ImageTextPairDataset
 
     DATASET_CONFIG_DICT = {"default": "configs/datasets/vg/defaults_caption.yaml"}
+@registry.register_builder("sbu_caption")
+class SBUCaptionBuilder(BaseDatasetBuilder):
+    train_dataset_cls = ImageTextPairDataset
+
+    DATASET_CONFIG_DICT = {"default": "configs/datasets/sbu_caption/defaults.yaml"}

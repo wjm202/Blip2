@@ -10,7 +10,7 @@ model:
   use_grad_checkpoint: True
   pretrained: "/paddle/workspace/checkpoints/blip2_pretrained.pdparams"
   #pretrained2: "pretrained/blip2_stage2.pdparams"
-  pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/output/BLIP2/Pretrain_stage2_paddle/20230628070/checkpoint_9.pdparams"
+  pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/output/BLIP2/Pretrain_stage2/20230709162/checkpoint_9.pdparams"
   # pretrained2: "/paddle/workspace/wjm/baidu/personal-code/PaddleNLP/blip2/lavis_paddle/output/BLIP2/Pretrain_stage2_paddle/20230625121/checkpoint_9.pdparams"
   freeze_vit: False
 
@@ -43,8 +43,8 @@ run:
   warmup_steps: 1000
   weight_decay: 0.05
   max_epoch: 5
-  batch_size_train: 11
-  batch_size_eval: 8
+  batch_size_train: 21
+  batch_size_eval: 1
   num_workers: 4
   accum_grad_iters: 1
 
@@ -55,11 +55,11 @@ run:
   seed: 42
   output_dir: "output/BLIP2/Caption_coco"
 
-  amp: False
+  amp: True
   resume_ckpt_path: null
 
   evaluate: False
-  # train_splits: ["train"]
+  train_splits: ["train"]
   valid_splits: ["val"]
   # test_splits: ["test"]
 

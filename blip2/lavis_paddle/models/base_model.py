@@ -84,7 +84,7 @@ class BaseModel(nn.Layer):
         When loading the pretrained model, each task-specific architecture may define their
         own load_from_pretrained() method.
         """
-        load_pretrained =cfg.get("pretrained", True)
+        load_pretrained =cfg.get("load_pretrained", True)
         if load_pretrained:
             pretrain_path = cfg.get("pretrained", None)
             assert "Found load_finetuned is False, but pretrain_path is None."
@@ -96,6 +96,7 @@ class BaseModel(nn.Layer):
             if pretrain2_path:
                 state_dict = paddle.load(pretrain2_path)['model']
                 # self.Qformer.set_state_dict(state_dict)
+                state_dict["opt_model.lm_head.decoder_weight"]=state_dict["opt_model.lm_head.decoder_weight"].astype("float32")
                 self.set_state_dict(state_dict)
                 logging.info("load checkpoint from %s" % pretrain2_path)
                 print('load\n\n\n\n\n\n\n')
