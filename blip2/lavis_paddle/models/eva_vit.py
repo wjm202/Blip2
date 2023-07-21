@@ -80,13 +80,13 @@ class Mlp(nn.Layer):
         self.drop = nn.Dropout(drop)
 
     def forward(self, x):
-        if isinstance(act_layer, nn.GELU)
+        if isinstance(act_layer, nn.GELU):
             x = _legacy_C_ops.fused_gemm_epilogue(
             x, self.fc1.weight, self.fc1.bias, 'trans_x', False, 'trans_y', False, 'activation', 'gelu')
-        elif isinstance(act_layer, nn.ReLU)
+        elif isinstance(act_layer, nn.ReLU):
             x = _legacy_C_ops.fused_gemm_epilogue(
             x, self.fc1.weight, self.fc1.bias, 'trans_x', False, 'trans_y', False, 'activation', 'relu')
-        else
+        else:
             x = self.fc1(x)
             x = self.act(x)
         x = self.fc2(x)
