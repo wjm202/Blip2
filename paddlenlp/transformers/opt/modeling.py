@@ -263,7 +263,7 @@ class MultiHeadAttention(nn.Layer):
             # incremental_state with initial value, mainly for usage like UniLM
             return self.Cache(key, value)
 
-    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None, use_flash_attn=True, is_causal=True):
+    def forward(self, query, key, value, attn_mask=None, use_cache=False, cache=None, output_attention=None, use_flash_attn=True, is_causal=True):
         r"""
         Applies multi-head attention to map queries and a set of key-value pairs
         to outputs.
@@ -275,12 +275,11 @@ class MultiHeadAttention(nn.Layer):
             q, k, v, cache = self._fuse_prepare_qkv(query, use_cache, cache, use_flash_attn)
         else:
             q, k, v, cache = self._prepare_qkv(query, key, value, use_cache, cache, use_flash_attn)
-
         if use_flash_attn:
             bsz, q_len, num_heads, head_dim = q.shape
             out, weights = flash_attention(q, k, v,
                                            causal=is_causal and q.shape[1] != 1,
-                                           return_softmax=self.need_weights,
+                                           return_softmax=self.need_weights and output_attention,
                                            dropout=self.dropout)
             out = out.reshape([bsz, q_len, head_dim * num_heads])
         else:
@@ -303,9 +302,7 @@ class MultiHeadAttention(nn.Layer):
         # project to output
         out = self.out_proj(out)
 
-        outs = [out]
-        if self.need_weights:
-            outs.append(weights)
+        outs = [out, weights]
         if use_cache:
             outs.append(cache)
         return out if len(outs) == 1 else tuple(outs)
@@ -382,9 +379,9 @@ class TransformerDecoderLayer(nn.Layer):
 
         # self.self_attn(...) --> hidden_states, weights, (cache)
         if use_cache is False:
-            tgt, attn_weights = self.self_attn(tgt, tgt, tgt, tgt_mask, use_cache, cache)
+            tgt, attn_weights = self.self_attn(tgt, tgt, tgt, tgt_mask, use_cache, cache, output_attention=None)
         else:
-            tgt, attn_weights, incremental_cache = self.self_attn(tgt, tgt, tgt, tgt_mask, use_cache, cache)
+            tgt, attn_weights, incremental_cache = self.self_attn(tgt, tgt, tgt, tgt_mask, use_cache, cache, output_attention)
         tgt = residual + self.dropout1(tgt)
         if not self.normalize_before:
             tgt = self.norm1(tgt)
@@ -401,7 +398,7 @@ class TransformerDecoderLayer(nn.Layer):
         if not (output_attentions or use_cache):
             return tgt
 
-        temp_list = [tgt, attn_weights if output_attentions else None, incremental_cache if use_cache else None]
+        temp_list = [tgt, attn_weights, incremental_cache if use_cache else None]
 
         return tuple(v for v in temp_list if v is not None)
 
